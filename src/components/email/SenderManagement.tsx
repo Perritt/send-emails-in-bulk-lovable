@@ -10,6 +10,97 @@ import { Plus, User, Settings, Trash2, AlertCircle, CheckCircle } from "lucide-r
 import { Sender } from "@/pages/Index";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
+interface EditSenderDialogProps {
+  sender: Sender;
+  onUpdate: (sender: Sender) => void;
+}
+
+const EditSenderDialog = ({ sender, onUpdate }: EditSenderDialogProps) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [editingSender, setEditingSender] = useState({
+    name: sender.name,
+    email: sender.email,
+    dailyLimit: sender.dailyLimit,
+    password: sender.config?.password || ""
+  });
+
+  const handleUpdate = () => {
+    const updatedSender: Sender = {
+      ...sender,
+      name: editingSender.name,
+      email: editingSender.email,
+      dailyLimit: editingSender.dailyLimit,
+      config: {
+        ...sender.config,
+        smtpHost: "smtp.feishu.cn",
+        smtpPort: 465,
+        password: editingSender.password
+      }
+    };
+    
+    onUpdate(updatedSender);
+    setIsOpen(false);
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Settings className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>编辑发件人</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="editName">发件人姓名</Label>
+            <Input
+              id="editName"
+              value={editingSender.name}
+              onChange={(e) => setEditingSender({...editingSender, name: e.target.value})}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editEmail">邮箱地址</Label>
+            <Input
+              id="editEmail"
+              type="email"
+              value={editingSender.email}
+              onChange={(e) => setEditingSender({...editingSender, email: e.target.value})}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editDailyLimit">每日发送限制</Label>
+            <Input
+              id="editDailyLimit"
+              type="number"
+              value={editingSender.dailyLimit}
+              onChange={(e) => setEditingSender({...editingSender, dailyLimit: parseInt(e.target.value)})}
+              min="1"
+              max="1000"
+            />
+          </div>
+          <div>
+            <Label htmlFor="editPassword">IMAP/SMTP 密码</Label>
+            <Input
+              id="editPassword"
+              type="password"
+              value={editingSender.password}
+              onChange={(e) => setEditingSender({...editingSender, password: e.target.value})}
+              placeholder="邮箱专用密码"
+            />
+          </div>
+          <Button onClick={handleUpdate} className="w-full">
+            保存修改
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 interface SenderManagementProps {
   senders: Sender[];
   onSendersChange: (senders: Sender[]) => void;
@@ -169,9 +260,9 @@ export const SenderManagement = ({ senders, onSendersChange }: SenderManagementP
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm">
-                            <Settings className="h-4 w-4" />
-                          </Button>
+                          <EditSenderDialog sender={sender} onUpdate={(updatedSender) => {
+                            onSendersChange(senders.map(s => s.id === sender.id ? updatedSender : s));
+                          }} />
                           <Button 
                             variant="outline" 
                             size="sm"
