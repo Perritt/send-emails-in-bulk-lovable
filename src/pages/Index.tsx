@@ -7,6 +7,8 @@ import { SenderManagement } from "@/components/email/SenderManagement";
 import { EmailTemplate } from "@/components/email/EmailTemplate";
 import { RecipientsList } from "@/components/email/RecipientsList";
 import { SendProgress } from "@/components/email/SendProgress";
+import { BatchEmailSender } from "@/services/emailService";
+import { useToast } from "@/hooks/use-toast";
 
 export interface Recipient {
   email: string;
@@ -51,9 +53,28 @@ const Index = () => {
   ]);
   const [isSending, setIsSending] = useState(false);
   const [sendProgress, setSendProgress] = useState({ sent: 0, total: 0, failed: 0 });
-
+  const { toast } = useToast();
   const handleSendEmails = async () => {
     if (!emailTemplate.subject || !emailTemplate.content || recipients.length === 0) {
+      toast({
+        title: "发送失败",
+        description: "请确保已设置邮件模板和收件人列表",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // 检查是否有可用的发件人
+    const availableSenders = senders.filter(sender => 
+      sender.config?.password && sender.sentToday < sender.dailyLimit
+    );
+
+    if (availableSenders.length === 0) {
+      toast({
+        title: "无可用发件人",
+        description: "请配置发件人或检查发送限额",
+        variant: "destructive"
+      });
       return;
     }
 
@@ -61,13 +82,40 @@ const Index = () => {
     setSendProgress({ sent: 0, total: recipients.length, failed: 0 });
     setActiveTab("progress");
 
-    // 模拟发送过程
-    for (let i = 0; i < recipients.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // 模拟发送延迟
-      setSendProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
-    }
+    try {
+      const batchSender = new BatchEmailSender([...senders]); // 创建副本避免直接修改
+      
+      const result = await batchSender.sendBatchEmails(
+        recipients,
+        emailTemplate,
+        (sent, failed) => {
+          setSendProgress(prev => ({ ...prev, sent, failed }));
+        }
+      );
 
-    setIsSending(false);
+      // 更新发件人的发送统计
+      setSenders(prevSenders => [...prevSenders]); // 触发重新渲染
+
+      toast({
+        title: "发送完成",
+        description: `成功发送 ${result.totalSent} 封，失败 ${result.totalFailed} 封`,
+        variant: result.totalFailed > 0 ? "destructive" : "default"
+      });
+
+      if (result.errors.length > 0) {
+        console.error("发送错误详情:", result.errors);
+      }
+
+    } catch (error) {
+      console.error("批量发送失败:", error);
+      toast({
+        title: "发送失败",
+        description: error instanceof Error ? error.message : "未知错误",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
