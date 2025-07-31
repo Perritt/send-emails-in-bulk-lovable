@@ -14,13 +14,107 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      email_logs: {
+        Row: {
+          error_message: string | null
+          id: string
+          recipient_email: string
+          recipient_name: string | null
+          sender_id: string
+          sent_at: string
+          status: string
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          recipient_email: string
+          recipient_name?: string | null
+          sender_id: string
+          sent_at?: string
+          status: string
+          subject: string
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          recipient_email?: string
+          recipient_name?: string | null
+          sender_id?: string
+          sent_at?: string
+          status?: string
+          subject?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "email_senders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_senders: {
+        Row: {
+          created_at: string
+          daily_limit: number
+          email: string
+          id: string
+          is_active: boolean
+          last_reset_date: string
+          name: string
+          sent_today: number
+          smtp_host: string
+          smtp_password: string
+          smtp_port: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_limit?: number
+          email: string
+          id?: string
+          is_active?: boolean
+          last_reset_date?: string
+          name: string
+          sent_today?: number
+          smtp_host?: string
+          smtp_password: string
+          smtp_port?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_limit?: number
+          email?: string
+          id?: string
+          is_active?: boolean
+          last_reset_date?: string
+          name?: string
+          sent_today?: number
+          smtp_host?: string
+          smtp_password?: string
+          smtp_port?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      reset_daily_email_counts: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
