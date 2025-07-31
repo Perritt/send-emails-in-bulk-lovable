@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Upload, Users, Plus, Trash2, Send, FileText, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Recipient } from "@/pages/Index";
+import { Recipient } from "@/types/email";
 import Papa from 'papaparse';
 
 interface RecipientsListProps {

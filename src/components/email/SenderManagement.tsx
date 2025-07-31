@@ -7,12 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, User, Settings, Trash2, AlertCircle, CheckCircle } from "lucide-react";
-import { Sender } from "@/pages/Index";
+import { EmailSender } from "@/types/email";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface EditSenderDialogProps {
-  sender: Sender;
-  onUpdate: (sender: Sender) => void;
+  sender: EmailSender;
+  onUpdate: (sender: EmailSender) => void;
 }
 
 const EditSenderDialog = ({ sender, onUpdate }: EditSenderDialogProps) => {
@@ -20,22 +20,17 @@ const EditSenderDialog = ({ sender, onUpdate }: EditSenderDialogProps) => {
   const [editingSender, setEditingSender] = useState({
     name: sender.name,
     email: sender.email,
-    dailyLimit: sender.dailyLimit,
-    password: sender.config?.password || ""
+    daily_limit: sender.daily_limit,
+    smtp_password: sender.smtp_password || ""
   });
 
   const handleUpdate = () => {
-    const updatedSender: Sender = {
+    const updatedSender: EmailSender = {
       ...sender,
       name: editingSender.name,
       email: editingSender.email,
-      dailyLimit: editingSender.dailyLimit,
-      config: {
-        ...sender.config,
-        smtpHost: "smtp.feishu.cn",
-        smtpPort: 465,
-        password: editingSender.password
-      }
+      daily_limit: editingSender.daily_limit,
+      smtp_password: editingSender.smtp_password
     };
     
     onUpdate(updatedSender);
@@ -76,8 +71,8 @@ const EditSenderDialog = ({ sender, onUpdate }: EditSenderDialogProps) => {
             <Input
               id="editDailyLimit"
               type="number"
-              value={editingSender.dailyLimit}
-              onChange={(e) => setEditingSender({...editingSender, dailyLimit: parseInt(e.target.value)})}
+              value={editingSender.daily_limit}
+              onChange={(e) => setEditingSender({...editingSender, daily_limit: parseInt(e.target.value)})}
               min="1"
               max="1000"
             />
@@ -87,8 +82,8 @@ const EditSenderDialog = ({ sender, onUpdate }: EditSenderDialogProps) => {
             <Input
               id="editPassword"
               type="password"
-              value={editingSender.password}
-              onChange={(e) => setEditingSender({...editingSender, password: e.target.value})}
+              value={editingSender.smtp_password}
+              onChange={(e) => setEditingSender({...editingSender, smtp_password: e.target.value})}
               placeholder="邮箱专用密码"
             />
           </div>
@@ -102,8 +97,8 @@ const EditSenderDialog = ({ sender, onUpdate }: EditSenderDialogProps) => {
 };
 
 interface SenderManagementProps {
-  senders: Sender[];
-  onSendersChange: (senders: Sender[]) => void;
+  senders: EmailSender[];
+  onSendersChange: (senders: EmailSender[]) => void;
 }
 
 export const SenderManagement = ({ senders, onSendersChange }: SenderManagementProps) => {
@@ -111,38 +106,43 @@ export const SenderManagement = ({ senders, onSendersChange }: SenderManagementP
   const [newSender, setNewSender] = useState({
     email: "",
     name: "",
-    dailyLimit: 100,
-    password: ""
+    daily_limit: 100,
+    smtp_password: ""
   });
 
-  const handleAddSender = () => {
+  const handleAddSender = async () => {
     if (!newSender.email || !newSender.name) return;
 
-    const sender: Sender = {
-      id: Date.now().toString(),
-      email: newSender.email,
-      name: newSender.name,
-      dailyLimit: newSender.dailyLimit,
-      sentToday: 0,
-      config: {
-        smtpHost: "smtp.feishu.cn",
-        smtpPort: 465,
-        password: newSender.password
-      }
-    };
+    try {
+      const { realEmailService } = await import("@/services/realEmailService");
+      const addedSender = await realEmailService.addSender({
+        name: newSender.name,
+        email: newSender.email,
+        smtp_password: newSender.smtp_password,
+        smtp_host: "smtp.feishu.cn",
+        smtp_port: 465,
+        daily_limit: newSender.daily_limit,
+        sent_today: 0,
+        last_reset_date: new Date().toISOString().split('T')[0],
+        is_active: true
+      });
 
-    onSendersChange([...senders, sender]);
-    setNewSender({ email: "", name: "", dailyLimit: 100, password: "" });
-    setIsAddDialogOpen(false);
+      onSendersChange([...senders, addedSender]);
+
+      setNewSender({ email: "", name: "", daily_limit: 100, smtp_password: "" });
+      setIsAddDialogOpen(false);
+    } catch (error) {
+      console.error('添加发件人失败:', error);
+    }
   };
 
   const handleDeleteSender = (id: string) => {
     onSendersChange(senders.filter(s => s.id !== id));
   };
 
-  const getSenderStatus = (sender: Sender) => {
-    if (!sender.config?.password) return "未配置";
-    if (sender.sentToday >= sender.dailyLimit) return "已达上限";
+  const getSenderStatus = (sender: EmailSender) => {
+    if (!sender.smtp_password) return "未配置";
+    if (sender.sent_today >= sender.daily_limit) return "已达上限";
     return "可用";
   };
 
@@ -199,8 +199,8 @@ export const SenderManagement = ({ senders, onSendersChange }: SenderManagementP
                   <Input
                     id="dailyLimit"
                     type="number"
-                    value={newSender.dailyLimit}
-                    onChange={(e) => setNewSender({...newSender, dailyLimit: parseInt(e.target.value)})}
+                    value={newSender.daily_limit}
+                    onChange={(e) => setNewSender({...newSender, daily_limit: parseInt(e.target.value)})}
                     min="1"
                     max="1000"
                   />
@@ -210,8 +210,8 @@ export const SenderManagement = ({ senders, onSendersChange }: SenderManagementP
                   <Input
                     id="password"
                     type="password"
-                    value={newSender.password}
-                    onChange={(e) => setNewSender({...newSender, password: e.target.value})}
+                    value={newSender.smtp_password}
+                    onChange={(e) => setNewSender({...newSender, smtp_password: e.target.value})}
                     placeholder="邮箱专用密码"
                   />
                 </div>
@@ -249,7 +249,7 @@ export const SenderManagement = ({ senders, onSendersChange }: SenderManagementP
                       <TableCell className="font-medium">{sender.name}</TableCell>
                       <TableCell>{sender.email}</TableCell>
                       <TableCell>
-                        {sender.sentToday} / {sender.dailyLimit}
+                        {sender.sent_today} / {sender.daily_limit}
                       </TableCell>
                       <TableCell>
                         <Badge variant={getStatusColor(status) === "success" ? "default" : 

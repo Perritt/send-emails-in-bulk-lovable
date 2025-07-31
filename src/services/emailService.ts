@@ -1,4 +1,4 @@
-import { Recipient, Sender } from "@/pages/Index";
+import { Recipient } from "@/types/email";
 
 export interface EmailConfig {
   smtpHost: string;
@@ -80,7 +80,7 @@ export class EmailService {
     }
   }
 
-  static createFromSender(sender: Sender): EmailService {
+  static createFromSender(sender: any): EmailService {
     const config: EmailConfig = {
       smtpHost: sender.config?.smtpHost || FEISHU_CONFIG.smtpHost,
       smtpPort: sender.config?.smtpPort || FEISHU_CONFIG.smtpPort,
@@ -94,16 +94,16 @@ export class EmailService {
 }
 
 export class BatchEmailSender {
-  private senders: Sender[];
+  private senders: any[];
   private currentSenderIndex: number = 0;
 
-  constructor(senders: Sender[]) {
+  constructor(senders: any[]) {
     this.senders = senders.filter(sender => 
       sender.config?.password && sender.sentToday < sender.dailyLimit
     );
   }
 
-  private getNextAvailableSender(): Sender | null {
+  private getNextAvailableSender(): any | null {
     // 找到下一个可用的发件人
     const availableSenders = this.senders.filter(sender => 
       sender.sentToday < sender.dailyLimit

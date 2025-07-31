@@ -7,30 +7,12 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { EmailServiceProvider } from "@/components/email/EmailServiceProvider";
 import { SenderManagement } from "@/components/email/SenderManagement";
-import { EmailTemplate } from "@/components/email/EmailTemplate";
+import { EmailTemplate as EmailTemplateComponent } from "@/components/email/EmailTemplate";
 import { RecipientsList } from "@/components/email/RecipientsList";
 import { SendProgress } from "@/components/email/SendProgress";
-import { BatchEmailSender } from "@/services/emailService";
 import { useToast } from "@/hooks/use-toast";
-
-export interface Recipient {
-  email: string;
-  creatorName: string;
-  socialMediaLink: string;
-}
-
-export interface Sender {
-  id: string;
-  email: string;
-  name: string;
-  dailyLimit: number;
-  sentToday: number;
-  config?: {
-    smtpHost?: string;
-    smtpPort?: number;
-    password?: string;
-  };
-}
+import { EmailSender, Recipient, EmailTemplate } from "@/types/email";
+import { realEmailService } from "@/services/realEmailService";
 
 const Index = () => {
   const { user, loading, signOut } = useAuth();
@@ -42,20 +24,7 @@ const Index = () => {
     content: ""
   });
   const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [senders, setSenders] = useState<Sender[]>([
-    {
-      id: "1",
-      email: "Sean@insty.cc",
-      name: "Sean",
-      dailyLimit: 100,
-      sentToday: 0,
-      config: {
-        smtpHost: "smtp.feishu.cn",
-        smtpPort: 465,
-        password: "zcLJcyRvDKWpUb4V"
-      }
-    }
-  ]);
+  const [senders, setSenders] = useState<EmailSender[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [sendProgress, setSendProgress] = useState({ sent: 0, total: 0, failed: 0 });
   const { toast } = useToast();
@@ -103,7 +72,7 @@ const Index = () => {
 
     // 检查是否有可用的发件人
     const availableSenders = senders.filter(sender => 
-      sender.config?.password && sender.sentToday < sender.dailyLimit
+      sender.is_active && sender.sent_today < sender.daily_limit
     );
 
     if (availableSenders.length === 0) {
@@ -120,18 +89,18 @@ const Index = () => {
     setActiveTab("progress");
 
     try {
-      const batchSender = new BatchEmailSender([...senders]); // 创建副本避免直接修改
-      
-      const result = await batchSender.sendBatchEmails(
+      const result = await realEmailService.sendBatchEmails(
         recipients,
         emailTemplate,
+        availableSenders,
         (sent, failed) => {
           setSendProgress(prev => ({ ...prev, sent, failed }));
         }
       );
 
-      // 更新发件人的发送统计
-      setSenders(prevSenders => [...prevSenders]); // 触发重新渲染
+      // 刷新发件人列表以更新发送统计
+      const updatedSenders = await realEmailService.getSenders();
+      setSenders(updatedSenders);
 
       toast({
         title: "发送完成",
@@ -231,7 +200,7 @@ const Index = () => {
               </TabsContent>
 
               <TabsContent value="template" className="space-y-6">
-                <EmailTemplate
+                <EmailTemplateComponent
                   template={emailTemplate}
                   onTemplateChange={setEmailTemplate}
                 />
