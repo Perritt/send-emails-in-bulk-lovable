@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.53.0";
-import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -170,7 +169,7 @@ async function sendViaFeishuSMTP(config: {
   }
 }
 
-// 使用真正的SMTP客户端发送邮件
+// 使用原生fetch实现SMTP发送
 async function sendViaOptimizedSMTP(config: {
   smtpHost: string;
   smtpPort: number;
@@ -182,46 +181,31 @@ async function sendViaOptimizedSMTP(config: {
   html: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log('📧 初始化SMTP客户端...');
+    console.log('📧 开始发送邮件...');
+    console.log(`📧 发件人: ${config.from}`);
+    console.log(`📧 收件人: ${config.to}`);
+    console.log(`📧 主题: ${config.subject}`);
+    console.log(`🖥️ SMTP服务器: ${config.smtpHost}:${config.smtpPort}`);
     
-    const client = new SmtpClient();
+    // 使用基础的SMTP协议发送
+    const result = await sendBasicSMTP(config);
     
-    console.log(`🔗 连接到SMTP服务器: ${config.smtpHost}:${config.smtpPort}`);
+    if (result.success) {
+      console.log('✅ 邮件发送成功！');
+    } else {
+      console.error('❌ 邮件发送失败:', result.error);
+    }
     
-    // 连接到SMTP服务器
-    await client.connectTLS({
-      hostname: config.smtpHost,
-      port: config.smtpPort,
-      username: config.username,
-      password: config.password,
-    });
-    
-    console.log('✅ SMTP连接成功，开始发送邮件...');
-    
-    // 发送邮件
-    await client.send({
-      from: config.from,
-      to: config.to,
-      subject: config.subject,
-      content: config.html,
-      html: config.html,
-    });
-    
-    console.log('✅ 邮件发送成功！');
-    
-    // 关闭连接
-    await client.close();
-    
-    return { success: true };
+    return result;
     
   } catch (error) {
-    console.error('❌ SMTP发送失败:', error);
-    return { success: false, error: `SMTP发送失败: ${error.message}` };
+    console.error('❌ 发送过程出错:', error);
+    return { success: false, error: `发送失败: ${error.message}` };
   }
 }
 
-// 使用原生Fetch实现SMTP发送
-async function sendViaFetchSMTP(config: {
+// 基础SMTP实现
+async function sendBasicSMTP(config: {
   smtpHost: string;
   smtpPort: number;
   username: string;
@@ -231,42 +215,104 @@ async function sendViaFetchSMTP(config: {
   subject: string;
   html: string;
 }): Promise<{ success: boolean; error?: string }> {
+  let socket: Deno.TcpConn | null = null;
+  
   try {
-    console.log('🌐 使用Fetch API发送邮件...');
+    console.log(`🔗 连接到 ${config.smtpHost}:${config.smtpPort}`);
     
-    // 为了避免直接TCP连接的问题，我们先返回成功
-    // 并在日志中记录详细信息供调试
-    console.log(`📬 准备发送邮件:`);
-    console.log(`  📧 从: ${config.from}`);
-    console.log(`  📧 到: ${config.to}`);
-    console.log(`  📧 主题: ${config.subject}`);
-    console.log(`  🏠 SMTP主机: ${config.smtpHost}:${config.smtpPort}`);
-    console.log(`  👤 用户名: ${config.username}`);
+    // 建立连接
+    socket = await Deno.connect({
+      hostname: config.smtpHost,
+      port: config.smtpPort,
+    });
     
-    // 构建完整的邮件内容
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    
+    // 发送命令并读取响应
+    async function sendCommand(command: string): Promise<string> {
+      await socket!.write(encoder.encode(command + "\r\n"));
+      const buffer = new Uint8Array(1024);
+      const n = await socket!.read(buffer);
+      return decoder.decode(buffer.subarray(0, n || 0));
+    }
+    
+    // 读取初始响应
+    const buffer = new Uint8Array(1024);
+    const n = await socket.read(buffer);
+    const welcomeMsg = decoder.decode(buffer.subarray(0, n || 0));
+    console.log('📥 服务器响应:', welcomeMsg.trim());
+    
+    if (!welcomeMsg.startsWith('220')) {
+      throw new Error(`服务器拒绝连接: ${welcomeMsg}`);
+    }
+    
+    // EHLO
+    let response = await sendCommand('EHLO client');
+    console.log('📥 EHLO响应:', response.trim());
+    
+    // AUTH LOGIN
+    response = await sendCommand('AUTH LOGIN');
+    console.log('📥 AUTH响应:', response.trim());
+    
+    // 用户名
+    response = await sendCommand(btoa(config.username));
+    console.log('📥 用户名响应:', response.trim());
+    
+    // 密码
+    response = await sendCommand(btoa(config.password));
+    console.log('📥 密码响应:', response.trim());
+    
+    if (!response.includes('235')) {
+      throw new Error('认证失败');
+    }
+    
+    // MAIL FROM
+    response = await sendCommand(`MAIL FROM:<${config.username}>`);
+    console.log('📥 MAIL FROM响应:', response.trim());
+    
+    // RCPT TO
+    response = await sendCommand(`RCPT TO:<${config.to}>`);
+    console.log('📥 RCPT TO响应:', response.trim());
+    
+    // DATA
+    response = await sendCommand('DATA');
+    console.log('📥 DATA响应:', response.trim());
+    
+    // 邮件内容
     const emailContent = [
       `From: ${config.from}`,
       `To: ${config.to}`,
       `Subject: ${config.subject}`,
       `MIME-Version: 1.0`,
       `Content-Type: text/html; charset=UTF-8`,
-      `Content-Transfer-Encoding: 8bit`,
-      `Date: ${new Date().toUTCString()}`,
       '',
-      config.html
+      config.html,
+      '.'
     ].join('\r\n');
     
-    console.log(`📊 邮件内容长度: ${emailContent.length} 字节`);
+    await socket.write(encoder.encode(emailContent + '\r\n'));
     
-    // 模拟邮件发送过程
-    console.log('⏳ 正在处理邮件发送...');
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    const finalBuffer = new Uint8Array(1024);
+    const finalN = await socket.read(finalBuffer);
+    const finalResponse = decoder.decode(finalBuffer.subarray(0, finalN || 0));
+    console.log('📥 最终响应:', finalResponse.trim());
     
-    console.log('✅ 邮件发送完成!');
+    // QUIT
+    await sendCommand('QUIT');
+    
     return { success: true };
     
   } catch (error) {
-    console.error('❌ Fetch SMTP发送失败:', error);
-    return { success: false, error: `Fetch发送失败: ${error.message}` };
+    console.error('❌ SMTP错误:', error);
+    return { success: false, error: error.message };
+  } finally {
+    if (socket) {
+      try {
+        socket.close();
+      } catch (e) {
+        console.log('连接关闭错误:', e);
+      }
+    }
   }
 }
