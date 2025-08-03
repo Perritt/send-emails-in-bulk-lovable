@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.53.0";
+import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -134,7 +135,7 @@ serve(async (req) => {
   }
 });
 
-// 使用飞书SMTP发送邮件的函数
+// 使用真实SMTP发送邮件的函数
 async function sendViaFeishuSMTP(config: {
   smtpHost: string;
   smtpPort: number;
@@ -145,40 +146,86 @@ async function sendViaFeishuSMTP(config: {
   subject: string;
   html: string;
 }): Promise<{ success: boolean; error?: string }> {
+  let client: SmtpClient | null = null;
+  
   try {
-    // 由于Deno环境限制，这里模拟SMTP发送过程
-    // 实际生产环境中，你可以使用nodemailer或其他SMTP库
-    
-    // 模拟网络延迟
-    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+    console.log(`🔗 正在连接SMTP服务器: ${config.smtpHost}:${config.smtpPort}`);
     
     // 验证配置参数
     if (!config.smtpHost || !config.username || !config.password) {
       return { success: false, error: 'SMTP配置不完整' };
     }
     
-    // 模拟发送成功率（90%成功率）
-    const isSuccess = Math.random() > 0.1;
+    // 创建SMTP客户端
+    client = new SmtpClient();
     
-    if (isSuccess) {
-      console.log(`📧 SMTP发送成功: ${config.to}`);
-      console.log(`服务器: ${config.smtpHost}:${config.smtpPort}`);
-      console.log(`发件人: ${config.from}`);
-      console.log(`主题: ${config.subject}`);
-      return { success: true };
-    } else {
-      const errors = [
-        'SMTP连接超时',
-        '认证失败，请检查邮箱密码',
-        '收件人邮箱不存在',
-        '邮件内容被拒绝',
-        '发送频率过快，请稍后重试'
-      ];
-      const randomError = errors[Math.floor(Math.random() * errors.length)];
-      return { success: false, error: randomError };
-    }
+    // 连接到SMTP服务器
+    await client.connect({
+      hostname: config.smtpHost,
+      port: config.smtpPort,
+      username: config.username,
+      password: config.password,
+    });
+    
+    console.log(`✅ SMTP连接成功: ${config.smtpHost}:${config.smtpPort}`);
+    
+    // 构建邮件内容
+    const emailContent = {
+      from: config.from,
+      to: config.to,
+      subject: config.subject,
+      content: config.html,
+      html: config.html,
+    };
+    
+    console.log(`📧 正在发送邮件到: ${config.to}`);
+    console.log(`📋 邮件主题: ${config.subject}`);
+    
+    // 发送邮件
+    await client.send(emailContent);
+    
+    console.log(`✅ 邮件发送成功: ${config.to}`);
+    console.log(`📊 发送详情: ${config.smtpHost}:${config.smtpPort} -> ${config.to}`);
+    
+    return { success: true };
+    
   } catch (error) {
-    console.error('SMTP发送错误:', error);
-    return { success: false, error: error.message || '未知SMTP错误' };
+    console.error('❌ SMTP发送错误:', error);
+    
+    // 详细的错误分类和处理
+    let errorMessage = '邮件发送失败';
+    
+    if (error.message) {
+      const errorMsg = error.message.toLowerCase();
+      
+      if (errorMsg.includes('connection') || errorMsg.includes('connect')) {
+        errorMessage = 'SMTP服务器连接失败，请检查服务器地址和端口';
+      } else if (errorMsg.includes('auth') || errorMsg.includes('login') || errorMsg.includes('password')) {
+        errorMessage = 'SMTP认证失败，请检查邮箱地址和密码';
+      } else if (errorMsg.includes('timeout')) {
+        errorMessage = 'SMTP连接超时，请稍后重试';
+      } else if (errorMsg.includes('certificate') || errorMsg.includes('ssl') || errorMsg.includes('tls')) {
+        errorMessage = 'SSL/TLS证书验证失败，请检查SMTP服务器配置';
+      } else if (errorMsg.includes('recipient') || errorMsg.includes('address')) {
+        errorMessage = '收件人邮箱地址无效或不存在';
+      } else if (errorMsg.includes('rate limit') || errorMsg.includes('quota')) {
+        errorMessage = '发送频率超限，请稍后重试';
+      } else {
+        errorMessage = `SMTP错误: ${error.message}`;
+      }
+    }
+    
+    return { success: false, error: errorMessage };
+    
+  } finally {
+    // 确保关闭SMTP连接
+    if (client) {
+      try {
+        await client.close();
+        console.log('🔒 SMTP连接已关闭');
+      } catch (closeError) {
+        console.error('关闭SMTP连接时出错:', closeError);
+      }
+    }
   }
 }
