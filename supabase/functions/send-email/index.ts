@@ -158,73 +158,162 @@ async function sendViaFeishuSMTP(config: {
       return { success: false, error: 'SMTP配置不完整' };
     }
 
-    // 使用 fetch 发送邮件到外部SMTP服务
+    // 使用真实的TCP连接发送SMTP
     console.log('⏳ 正在连接SMTP服务器...');
     
-    // 构造邮件内容
-    const emailData = {
-      host: config.smtpHost,
-      port: config.smtpPort,
-      secure: true, // 使用SSL
-      auth: {
-        user: config.username,
-        pass: config.password
-      },
-      from: config.from,
-      to: config.to,
-      subject: config.subject,
-      html: config.html
-    };
-
-    console.log('⏳ 正在进行SMTP认证...');
-    
-    // 使用第三方SMTP服务API
-    const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        service_id: 'smtp_service',
-        template_id: 'smtp_template',
-        user_id: 'public_key',
-        template_params: {
-          to_email: config.to,
-          from_name: config.from.split('<')[0].trim(),
-          from_email: config.username,
-          subject: config.subject,
-          message: config.html
-        },
-        accessToken: 'your_access_token'
-      })
-    });
-
-    if (!response.ok) {
-      console.log('❌ 使用备用方案：直接返回成功');
-      // 如果第三方服务失败，使用本地SMTP逻辑
-      console.log('⏳ 正在发送邮件内容...');
-      
-      // 这里实现简化的SMTP协议
-      const smtpResult = await sendViaDirectSMTP(config);
-      return smtpResult;
-    }
-    
-    console.log('✅ 邮件发送成功');
-    console.log(`📊 发送详情: ${config.smtpHost}:${config.smtpPort} -> ${config.to}`);
-    
-    return { success: true };
+    return await sendViaTCPSMTP(config);
     
   } catch (error) {
     console.error('❌ 邮件发送过程中出错:', error);
+    return { success: false, error: `发送失败: ${error.message}` };
+  }
+}
+
+// 使用TCP连接实现真实的SMTP发送
+async function sendViaTCPSMTP(config: {
+  smtpHost: string;
+  smtpPort: number;
+  username: string;
+  password: string;
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<{ success: boolean; error?: string }> {
+  let conn: Deno.TcpConn | null = null;
+  
+  try {
+    // 建立TCP连接
+    console.log(`📡 连接到 ${config.smtpHost}:${config.smtpPort}`);
+    conn = await Deno.connect({
+      hostname: config.smtpHost,
+      port: config.smtpPort,
+    });
     
-    // 如果出错，使用备用的直接SMTP发送
-    console.log('🔄 尝试备用发送方案...');
-    try {
-      const backupResult = await sendViaDirectSMTP(config);
-      return backupResult;
-    } catch (backupError) {
-      console.error('❌ 备用方案也失败:', backupError);
-      return { success: false, error: `发送失败: ${error.message}` };
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    
+    // 读取服务器响应的辅助函数
+    async function readResponse(): Promise<string> {
+      const buffer = new Uint8Array(1024);
+      const n = await conn!.read(buffer);
+      if (n === null) throw new Error('连接意外关闭');
+      return decoder.decode(buffer.subarray(0, n));
+    }
+    
+    // 发送命令的辅助函数
+    async function sendCommand(command: string): Promise<string> {
+      console.log(`📤 发送: ${command.trim()}`);
+      await conn!.write(encoder.encode(command + '\r\n'));
+      const response = await readResponse();
+      console.log(`📥 接收: ${response.trim()}`);
+      return response;
+    }
+    
+    // SMTP握手
+    let response = await readResponse();
+    console.log(`📥 服务器欢迎: ${response.trim()}`);
+    
+    if (!response.startsWith('220')) {
+      throw new Error(`SMTP服务器拒绝连接: ${response}`);
+    }
+    
+    // EHLO命令
+    response = await sendCommand('EHLO lovable-smtp');
+    if (!response.startsWith('250')) {
+      throw new Error(`EHLO失败: ${response}`);
+    }
+    
+    // STARTTLS (对于465端口通常不需要，因为已经是SSL)
+    if (config.smtpPort !== 465) {
+      response = await sendCommand('STARTTLS');
+      if (!response.startsWith('220')) {
+        throw new Error(`STARTTLS失败: ${response}`);
+      }
+    }
+    
+    // AUTH LOGIN
+    response = await sendCommand('AUTH LOGIN');
+    if (!response.startsWith('334')) {
+      throw new Error(`AUTH LOGIN失败: ${response}`);
+    }
+    
+    // 发送用户名（Base64编码）
+    const usernameB64 = btoa(config.username);
+    response = await sendCommand(usernameB64);
+    if (!response.startsWith('334')) {
+      throw new Error(`用户名认证失败: ${response}`);
+    }
+    
+    // 发送密码（Base64编码）
+    const passwordB64 = btoa(config.password);
+    response = await sendCommand(passwordB64);
+    if (!response.startsWith('235')) {
+      throw new Error(`密码认证失败: ${response}`);
+    }
+    
+    console.log('✅ SMTP认证成功');
+    
+    // MAIL FROM
+    const fromEmail = config.from.includes('<') ? 
+      config.from.match(/<(.+)>/)?.[1] || config.username : config.username;
+    response = await sendCommand(`MAIL FROM:<${fromEmail}>`);
+    if (!response.startsWith('250')) {
+      throw new Error(`MAIL FROM失败: ${response}`);
+    }
+    
+    // RCPT TO
+    response = await sendCommand(`RCPT TO:<${config.to}>`);
+    if (!response.startsWith('250')) {
+      throw new Error(`RCPT TO失败: ${response}`);
+    }
+    
+    // DATA
+    response = await sendCommand('DATA');
+    if (!response.startsWith('354')) {
+      throw new Error(`DATA命令失败: ${response}`);
+    }
+    
+    // 发送邮件内容
+    const emailContent = [
+      `From: ${config.from}`,
+      `To: ${config.to}`,
+      `Subject: ${config.subject}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: text/html; charset=UTF-8`,
+      `Content-Transfer-Encoding: 8bit`,
+      `Date: ${new Date().toUTCString()}`,
+      '',
+      config.html,
+      '.'
+    ].join('\r\n');
+    
+    console.log('📧 发送邮件内容...');
+    await conn.write(encoder.encode(emailContent + '\r\n'));
+    
+    response = await readResponse();
+    console.log(`📥 发送结果: ${response.trim()}`);
+    
+    if (!response.startsWith('250')) {
+      throw new Error(`邮件发送失败: ${response}`);
+    }
+    
+    // QUIT
+    await sendCommand('QUIT');
+    
+    console.log('✅ 邮件发送成功！');
+    return { success: true };
+    
+  } catch (error) {
+    console.error('❌ SMTP连接错误:', error);
+    return { success: false, error: `SMTP错误: ${error.message}` };
+  } finally {
+    if (conn) {
+      try {
+        conn.close();
+      } catch (e) {
+        console.log('连接关闭时出错:', e);
+      }
     }
   }
 }
