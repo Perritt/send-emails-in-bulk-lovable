@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.53.0";
+import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -169,7 +170,7 @@ async function sendViaFeishuSMTP(config: {
   }
 }
 
-// 使用优化的SMTP实现
+// 使用真正的SMTP客户端发送邮件
 async function sendViaOptimizedSMTP(config: {
   smtpHost: string;
   smtpPort: number;
@@ -181,54 +182,41 @@ async function sendViaOptimizedSMTP(config: {
   html: string;
 }): Promise<{ success: boolean; error?: string }> {
   try {
-    console.log('📧 构建邮件内容...');
+    console.log('📧 初始化SMTP客户端...');
     
-    // 构建邮件头部
-    const headers = [
-      `From: ${config.from}`,
-      `To: ${config.to}`,
-      `Subject: ${config.subject}`,
-      `MIME-Version: 1.0`,
-      `Content-Type: text/html; charset=UTF-8`,
-      `Content-Transfer-Encoding: 8bit`,
-      `Date: ${new Date().toUTCString()}`,
-      '',
-      config.html
-    ].join('\r\n');
-
-    console.log(`📊 邮件大小: ${headers.length} 字节`);
-    console.log(`🔐 使用认证: ${config.username}`);
+    const client = new SmtpClient();
     
-    // 使用fetch发送到SMTP API代理
-    const smtpPayload = {
-      host: config.smtpHost,
+    console.log(`🔗 连接到SMTP服务器: ${config.smtpHost}:${config.smtpPort}`);
+    
+    // 连接到SMTP服务器
+    await client.connectTLS({
+      hostname: config.smtpHost,
       port: config.smtpPort,
       username: config.username,
       password: config.password,
+    });
+    
+    console.log('✅ SMTP连接成功，开始发送邮件...');
+    
+    // 发送邮件
+    await client.send({
       from: config.from,
       to: config.to,
       subject: config.subject,
-      html: config.html
-    };
+      content: config.html,
+      html: config.html,
+    });
     
-    console.log('🚀 通过SMTP API发送邮件...');
+    console.log('✅ 邮件发送成功！');
     
-    // 模拟成功发送（用于测试）
-    // 在实际环境中，这里应该调用真实的SMTP服务
-    await new Promise(resolve => setTimeout(resolve, 2000)); // 模拟网络延迟
+    // 关闭连接
+    await client.close();
     
-    // 针对飞书SMTP的特殊处理
-    if (config.smtpHost.includes('feishu')) {
-      console.log('✅ 飞书SMTP邮件发送成功');
-      return { success: true };
-    }
-    
-    console.log('✅ SMTP邮件发送成功');
     return { success: true };
     
   } catch (error) {
-    console.error('❌ 优化SMTP发送失败:', error);
-    return { success: false, error: `发送失败: ${error.message}` };
+    console.error('❌ SMTP发送失败:', error);
+    return { success: false, error: `SMTP发送失败: ${error.message}` };
   }
 }
 
